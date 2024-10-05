@@ -3,6 +3,13 @@ local pickers = require('telescope.pickers')
 local conf = require('telescope.config').values
 
 
+--[[
+-- TODO: Handle multi line extended attributes, as they get b64 encoded.
+-- Solution: Just use "attr" instead of "getfattr" and "setfattr"
+--
+-- TODO: Search files for attributes
+--]]
+
 local search_extended_attributes = function(opts)
 	if opts == nil then
 		return nil
@@ -28,53 +35,90 @@ local search_extended_attributes = function(opts)
 end
 
 
-local function get_xattr()
-	local file = vim.fn.expand('%:p')
-
+---Get the extended attributes for the given file/filepath.
+---@param file string
+---@return string[] | nil
+local function get_xattrs(file)
 	local handle = io.popen('getfattr -d ' .. file .. ' 2>/dev/null')
+	if handle == nil then
+		vim.notify("Could not get metadata on file \"" .. file .. "\".", vim.log.levels.ERROR)
+		return nil
+	end
+
 	local result = handle:read("*a")
 	handle:close()
 
 	if result == "" then
-		print("No extended attributes found.")
-	else
-		-- Display the result in a preview window
-		vim.cmd('new')
-		vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(result, '\n'))
+		vim.notify("No extended attributes found.", vim.log.levels.INFO)
+		return nil
 	end
+
+	return vim.split(result, "\n")
 end
-
-
-local function set_xattr()
-	local attr_name = vim.fn.input("Attribute name: ")
-	local attr_value = vim.fn.input("Attribute value: ")
-	local file = vim.fn.expand('%:p')
-
-	local cmd = 'setfattr -n ' .. attr_name .. ' -v ' .. attr_value .. ' ' .. file
-	local result = os.execute(cmd)
-
-	if result == 0 then
-		print("Extended attribute set successfully.")
-	else
-		print("Failed to set extended attribute.")
-	end
-end
-
-
-
 
 local M = {}
+
+---comment
+---@param file string
+---@param attrs table
+M._set_xattrs = function(file, attrs)
+	for key, value in pairs(attrs) do
+		local cmd = 'setfattr -n user.' .. key .. ' -v "' .. value .. '" "' .. file .. '"'
+		local result = os.execute(cmd)
+
+		-- TODO: Handle result
+	end
+end
 
 M.setup = function(opts)
 end
 
-set_xattr()
-get_xattr()
+---comment
+---@param content string
+---@return table
+M._parse_xattrs = function(content)
+	local attributes = {}
 
+	for key, value in content:gmatch('user%.(%w+)%s*=%s*"(.-[^\\])"') do
+		attributes[key] = value
+	end
 
--- search_extended_attributes({
--- 	attribute_name = "user.type",
--- 	attribute_value = "main",
--- })
+	return attributes
+end
+
+M.edit_xattrs = function(file)
+	file = file or vim.fn.expand('%:p')
+	local xattrs = get_xattrs(file)
+	if xattrs == nil then
+		return
+	end
+
+	local temp_file_path = vim.fn.tempname()
+	vim.api.nvim_command("e " .. temp_file_path)
+
+	local bufno = vim.api.nvim_get_current_buf()
+
+	vim.bo[bufno].bufhidden = 'wipe'
+	vim.bo[bufno].swapfile = false
+
+	vim.api.nvim_buf_set_lines(bufno, 0, -1, false, xattrs)
+	vim.api.nvim_buf_call(bufno, function()
+		vim.api.nvim_command("silent write")
+	end)
+
+	vim.api.nvim_create_autocmd("BufWritePost", {
+		pattern = temp_file_path,
+		callback = function()
+			local lines = vim.fn.readfile(temp_file_path)
+			local content = table.concat(lines, "\n")
+
+			local attrs = M._parse_xattrs(content)
+			print(vim.inspect(attrs))
+			M._set_xattrs(file, attrs)
+		end
+	})
+end
+
+M.edit_xattrs()
 
 return M

@@ -10,6 +10,17 @@ local conf = require('telescope.config').values
 -- TODO: Search files for attributes
 --]]
 
+local function table_to_list(tbl)
+	local result = {}
+	-- Iterate through each key-value pair in the table
+	for key, value in pairs(tbl) do
+		local entry = string.format('"%s"="%s"', key, tostring(value))
+		table.insert(result, entry)
+	end
+
+	return result
+end
+
 local search_extended_attributes = function(opts)
 	if opts == nil then
 		return nil
@@ -34,27 +45,41 @@ local search_extended_attributes = function(opts)
 	}):find()
 end
 
-
----Get the extended attributes for the given file/filepath.
----@param file string
----@return string[] | nil
-local function get_xattrs(file)
-	local handle = io.popen('getfattr -d ' .. file .. ' 2>/dev/null')
-	if handle == nil then
-		vim.notify("Could not get metadata on file \"" .. file .. "\".", vim.log.levels.ERROR)
-		return nil
+local function get_xattrs(filepath)
+	local attr_list_cmd = "attr -l \"" .. (filepath) .. "\"" .. " 2>/dev/null"
+	local handle1 = io.popen(attr_list_cmd)
+	if handle1 == nil then
+		vim.notify("Could not check extended attributes of file " .. filepath, vim.log.levels.ERROR)
+		return
 	end
 
-	local result = handle:read("*a")
-	handle:close()
+	local attr_list_result = handle1:read("*a")
+	handle1:close()
 
-	if result == "" then
-		vim.notify("No extended attributes found.", vim.log.levels.INFO)
-		return nil
+	local attrs = {}
+	for name in attr_list_result:gmatch("Attribute \"(.-)\"") do
+		local attr_get_cmd = "attr -g \"" .. name .. "\" \"" .. filepath .. "\"" .. " 2>/dev/null"
+		local handle2 = io.popen(attr_get_cmd)
+		if handle2 == nil then
+			vim.notify("Could not check value of extended attribute " .. name, vim.log.levels.ERROR)
+			return
+		end
+
+		_ = handle2:read("*l") -- Skip the first line of output
+		local value = handle2:read("*a")
+		handle2:close()
+
+		-- Remove the last byte from the result
+		if (#value > 0) and (value:sub(-1) == "\n") then
+			value = value:sub(1, -2)
+		end
+
+		attrs[name] = value
 	end
 
-	return vim.split(result, "\n")
+	return attrs
 end
+
 
 local M = {}
 
@@ -87,7 +112,6 @@ M._parse_xattrs = function(content)
 end
 
 M.edit_xattrs = function(file)
-	file = file or vim.fn.expand('%:p')
 	local xattrs = get_xattrs(file)
 	if xattrs == nil then
 		return
@@ -101,7 +125,7 @@ M.edit_xattrs = function(file)
 	vim.bo[bufno].bufhidden = 'wipe'
 	vim.bo[bufno].swapfile = false
 
-	vim.api.nvim_buf_set_lines(bufno, 0, -1, false, xattrs)
+	vim.api.nvim_buf_set_lines(bufno, 0, -1, false, table_to_list(xattrs))
 	vim.api.nvim_buf_call(bufno, function()
 		vim.api.nvim_command("silent write")
 	end)
@@ -109,16 +133,16 @@ M.edit_xattrs = function(file)
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		pattern = temp_file_path,
 		callback = function()
-			local lines = vim.fn.readfile(temp_file_path)
-			local content = table.concat(lines, "\n")
-
-			local attrs = M._parse_xattrs(content)
-			print(vim.inspect(attrs))
-			M._set_xattrs(file, attrs)
+			-- local lines = vim.fn.readfile(temp_file_path)
+			-- local content = table.concat(lines, "\n")
+			--
+			-- local attrs = M._parse_xattrs(content)
+			-- print(vim.inspect(attrs))
+			-- M._set_xattrs(file, attrs)
 		end
 	})
 end
 
-M.edit_xattrs()
+M.edit_xattrs(vim.fn.expand("%:p"))
 
 return M

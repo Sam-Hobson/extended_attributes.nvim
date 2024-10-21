@@ -10,12 +10,51 @@ local conf = require('telescope.config').values
 -- TODO: Search files for attributes
 --]]
 
-local function table_to_list(tbl)
+local function attr_table_to_lines(tbl, attribute_prefix)
+	attribute_prefix = attribute_prefix or "---"
+
 	local result = {}
 	-- Iterate through each key-value pair in the table
 	for key, value in pairs(tbl) do
-		local entry = string.format('"%s"="%s"', key, tostring(value))
-		table.insert(result, entry)
+		local first_line_key = true
+
+		for line in key:gmatch("([^\n]*\n?)") do
+			-- At the end of the line
+			if line == "" then
+				break
+			end
+
+			-- Remove new line
+			local ends_with_newline = line:sub(-1) == "\n"
+			if ends_with_newline then
+				line = line:sub(1, -2)
+			end
+
+			if first_line_key then
+				table.insert(result, string.format("%s attr: %s", attribute_prefix, line))
+			else
+				table.insert(result, string.format("%s %s", attribute_prefix, line))
+			end
+
+			first_line_key = false
+		end
+
+		for line in value:gmatch("([^\n]*\n?)") do
+			-- At the end of the line
+			if line == "" then
+				break
+			end
+
+			-- Remove new line
+			local ends_with_newline = line:sub(-1) == "\n"
+			if ends_with_newline then
+				line = line:sub(1, -2)
+			end
+
+			table.insert(result, line)
+		end
+
+		table.insert(result, "")
 	end
 
 	return result
@@ -57,7 +96,7 @@ local function get_xattrs(filepath)
 	handle1:close()
 
 	local attrs = {}
-	for name in attr_list_result:gmatch("Attribute \"(.-)\"") do
+	for name in attr_list_result:gmatch('Attribute%s+"(.-)"') do
 		local attr_get_cmd = "attr -g \"" .. name .. "\" \"" .. filepath .. "\"" .. " 2>/dev/null"
 		local handle2 = io.popen(attr_get_cmd)
 		if handle2 == nil then
@@ -65,18 +104,17 @@ local function get_xattrs(filepath)
 			return
 		end
 
-		_ = handle2:read("*l") -- Skip the first line of output
-		local value = handle2:read("*a")
+		local data = handle2:read("*a")
 		handle2:close()
 
-		-- Remove the last byte from the result
-		if (#value > 0) and (value:sub(-1) == "\n") then
-			value = value:sub(1, -2)
-		end
+		local attribute, value = data:match('Attribute%s+"(.-)"%s+had%sa%s%d+%sbyte%svalue%sfor%s.-:%s*(.-)%s*$')
 
-		attrs[name] = value
+		if attribute then
+			attrs[attribute] = value
+		end
 	end
 
+	print(vim.inspect(attrs))
 	return attrs
 end
 
@@ -99,16 +137,9 @@ M.setup = function(opts)
 end
 
 ---comment
----@param content string
+---@param content string[]
 ---@return table
 M._parse_xattrs = function(content)
-	local attributes = {}
-
-	for key, value in content:gmatch('user%.(%w+)%s*=%s*"(.-[^\\])"') do
-		attributes[key] = value
-	end
-
-	return attributes
 end
 
 M.edit_xattrs = function(file)
@@ -125,7 +156,7 @@ M.edit_xattrs = function(file)
 	vim.bo[bufno].bufhidden = 'wipe'
 	vim.bo[bufno].swapfile = false
 
-	vim.api.nvim_buf_set_lines(bufno, 0, -1, false, table_to_list(xattrs))
+	vim.api.nvim_buf_set_lines(bufno, 0, -1, false, attr_table_to_lines(xattrs))
 	vim.api.nvim_buf_call(bufno, function()
 		vim.api.nvim_command("silent write")
 	end)
@@ -133,11 +164,9 @@ M.edit_xattrs = function(file)
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		pattern = temp_file_path,
 		callback = function()
-			-- local lines = vim.fn.readfile(temp_file_path)
-			-- local content = table.concat(lines, "\n")
-			--
-			-- local attrs = M._parse_xattrs(content)
-			-- print(vim.inspect(attrs))
+			local lines = vim.fn.readfile(temp_file_path)
+			print(vim.inspect(lines))
+			local attrs = M._parse_xattrs(lines)
 			-- M._set_xattrs(file, attrs)
 		end
 	})

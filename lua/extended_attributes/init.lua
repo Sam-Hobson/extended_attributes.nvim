@@ -25,8 +25,7 @@ local function attr_table_to_lines(tbl, attribute_prefix)
 			end
 
 			-- Remove new line
-			local ends_with_newline = line:sub(-1) == "\n"
-			if ends_with_newline then
+			if line:sub(-1) == "\n" then
 				line = line:sub(1, -2)
 			end
 
@@ -46,8 +45,7 @@ local function attr_table_to_lines(tbl, attribute_prefix)
 			end
 
 			-- Remove new line
-			local ends_with_newline = line:sub(-1) == "\n"
-			if ends_with_newline then
+			if line:sub(-1) == "\n" then
 				line = line:sub(1, -2)
 			end
 
@@ -114,10 +112,8 @@ local function get_xattrs(filepath)
 		end
 	end
 
-	print(vim.inspect(attrs))
 	return attrs
 end
-
 
 local M = {}
 
@@ -133,19 +129,68 @@ M._set_xattrs = function(file, attrs)
 	end
 end
 
-M.setup = function(opts)
-end
-
 ---comment
 ---@param content string[]
 ---@return table
-M._parse_xattrs = function(content)
+M._parse_xattrs = function(content, attribute_prefix)
+	-- Escape all special characters in the attribute_prefix
+	local escaped_attribute_prefix = attribute_prefix:gsub("([%.%-%*%+%?%^%$%[%]%(%)%\\])", "%%%1")
+
+	local result = {}
+	local key_builder = {}
+	local value_builder = {}
+	local in_key = false
+
+	for _, line in ipairs(content) do
+		-- Parse key
+		if in_key then
+			if line:sub(1, #attribute_prefix) == attribute_prefix then
+				table.insert(key_builder, line:match("^" .. escaped_attribute_prefix .. "%s*(%S*)%s*"))
+				goto continue
+			else
+				in_key = false
+			end
+		end
+
+		-- Found key
+		local key_prefix = line:match("^" .. escaped_attribute_prefix .. "%s*attr:%s*(%S+)%s*")
+		if key_prefix ~= nil then
+			-- We have a previously created key-value pair
+			if #key_builder > 0 then
+				result[table.concat(key_builder, "\n")] = table.concat(value_builder, "\n")
+				key_builder = {}
+				value_builder = {}
+			end
+
+			table.insert(key_builder, key_prefix)
+			in_key = true
+			goto continue
+		end
+
+		-- Deal with value, if there is no key, skip
+		if #key_builder == 0 then
+			goto continue
+		end
+
+		table.insert(value_builder, line)
+
+		::continue::
+	end
+
+	if #key_builder > 0 then
+		result[table.concat(key_builder, "\n")] = table.concat(value_builder, "\n")
+	end
+
+	return result
 end
 
-M.edit_xattrs = function(file)
+---comment
+---@param file string
+---@return string
+M.xattrs_buffer = function(file)
 	local xattrs = get_xattrs(file)
 	if xattrs == nil then
-		return
+		return ""
 	end
 
 	local temp_file_path = vim.fn.tempname()
@@ -161,17 +206,21 @@ M.edit_xattrs = function(file)
 		vim.api.nvim_command("silent write")
 	end)
 
+	return temp_file_path
+end
+
+M.xattrs_buffer_write_hook = function(filepath, xattrs_buffer_parser)
 	vim.api.nvim_create_autocmd("BufWritePost", {
-		pattern = temp_file_path,
+		pattern = filepath,
 		callback = function()
-			local lines = vim.fn.readfile(temp_file_path)
-			print(vim.inspect(lines))
-			local attrs = M._parse_xattrs(lines)
+			local lines = vim.fn.readfile(filepath)
+			local attrs = xattrs_buffer_parser(lines, "---")
 			-- M._set_xattrs(file, attrs)
 		end
 	})
 end
 
-M.edit_xattrs(vim.fn.expand("%:p"))
+local buf = M.xattrs_buffer(vim.fn.expand("%:p"))
+M.xattrs_buffer_write_hook(buf, M._parse_xattrs)
 
 return M

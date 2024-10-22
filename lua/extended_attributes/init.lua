@@ -1,18 +1,9 @@
-local finders = require('telescope.finders')
-local pickers = require('telescope.pickers')
-local conf = require('telescope.config').values
+-- local finders = require('telescope.finders')
+-- local pickers = require('telescope.pickers')
+-- local conf = require('telescope.config').values
 
 
---[[
--- TODO: Handle multi line extended attributes, as they get b64 encoded.
--- Solution: Just use "attr" instead of "getfattr" and "setfattr"
---
--- TODO: Search files for attributes
---]]
-
-local function attr_table_to_lines(tbl, attribute_prefix)
-	attribute_prefix = attribute_prefix or "---"
-
+local function attr_table_to_lines(opts, tbl)
 	local result = {}
 	-- Iterate through each key-value pair in the table
 	for key, value in pairs(tbl) do
@@ -30,9 +21,9 @@ local function attr_table_to_lines(tbl, attribute_prefix)
 			end
 
 			if first_line_key then
-				table.insert(result, string.format("%s attr: %s", attribute_prefix, line))
+				table.insert(result, string.format("%s attr: %s", opts.attribute_prefix, line))
 			else
-				table.insert(result, string.format("%s %s", attribute_prefix, line))
+				table.insert(result, string.format("%s %s", opts.attribute_prefix, line))
 			end
 
 			first_line_key = false
@@ -58,35 +49,36 @@ local function attr_table_to_lines(tbl, attribute_prefix)
 	return result
 end
 
-local search_extended_attributes = function(opts)
-	if opts == nil then
-		return nil
-	end
+-- local search_extended_attributes = function(opts)
+-- 	if opts == nil then
+-- 		return nil
+-- 	end
+--
+-- 	local search_path = opts.search_path or '.'
+-- 	local attribute_name = opts.attribute_name
+-- 	local attribute_value = opts.attribute_value
+--
+-- 	local cmd = string.format(
+-- 		"find %s -type f -exec sh -c 'getfattr -n %s --only-values \"$1\" 2>/dev/null | grep -q \"%s\" && echo \"$1\"' _ {} \\;",
+-- 		search_path, attribute_name, attribute_value
+-- 	)
+--
+-- 	-- Start a Telescope picker
+-- 	pickers.new(opts, {
+-- 		prompt_title = "Search Files with Extended Attributes",
+-- 		finder = finders.new_job(function(prompt)
+-- 			return { 'bash', '-c', cmd }
+-- 		end, opts.entry_maker or conf.file_entry_maker),
+-- 		sorter = conf.generic_sorter(opts),
+-- 	}):find()
+-- end
 
-	local search_path = opts.search_path or '.'
-	local attribute_name = opts.attribute_name
-	local attribute_value = opts.attribute_value
-
-	local cmd = string.format(
-		"find %s -type f -exec sh -c 'getfattr -n %s --only-values \"$1\" 2>/dev/null | grep -q \"%s\" && echo \"$1\"' _ {} \\;",
-		search_path, attribute_name, attribute_value
-	)
-
-	-- Start a Telescope picker
-	pickers.new(opts, {
-		prompt_title = "Search Files with Extended Attributes",
-		finder = finders.new_job(function(prompt)
-			return { 'bash', '-c', cmd }
-		end, opts.entry_maker or conf.file_entry_maker),
-		sorter = conf.generic_sorter(opts),
-	}):find()
-end
-
-local function get_xattrs(filepath)
+local function get_xattrs(opts, filepath)
 	local attr_list_cmd = "attr -l \"" .. (filepath) .. "\"" .. " 2>/dev/null"
 	local handle1 = io.popen(attr_list_cmd)
 	if handle1 == nil then
-		vim.notify("Could not check extended attributes of file " .. filepath, vim.log.levels.ERROR)
+		local err = string.format("Could not check extended attributes of file %s", filepath)
+		vim.notify(err, vim.log.levels.ERROR)
 		return
 	end
 
@@ -98,7 +90,8 @@ local function get_xattrs(filepath)
 		local attr_get_cmd = "attr -g \"" .. name .. "\" \"" .. filepath .. "\"" .. " 2>/dev/null"
 		local handle2 = io.popen(attr_get_cmd)
 		if handle2 == nil then
-			vim.notify("Could not check value of extended attribute " .. name, vim.log.levels.ERROR)
+			local err = string.format("Could not check value of extended attribute %s", name)
+			vim.notify(err, vim.log.levels.ERROR)
 			return
 		end
 
@@ -115,37 +108,50 @@ local function get_xattrs(filepath)
 	return attrs
 end
 
-local M = {}
+local function set_xattrs(opts, file, previous_attrs, current_attrs)
+	-- Remove all attributes that have been deleted
+	for key, _ in pairs(previous_attrs) do
+		if not current_attrs[key] then
+			local cmd = 'attr -r "' .. key .. '" "' .. file .. '"'
 
----comment
----@param file string
----@param attrs table
-M._set_xattrs = function(file, attrs)
-	for key, value in pairs(attrs) do
-		local cmd = 'setfattr -n user.' .. key .. ' -v "' .. value .. '" "' .. file .. '"'
+			local result = os.execute(cmd)
+			if not result then
+				local err = string.format("Could not remove extended attribute %s of file %s", key, file)
+				vim.notify(err, vim.log.levels.ERROR)
+			end
+		end
+	end
+
+	-- Update all attributes that have been changed
+	for key, value in pairs(current_attrs) do
+		local cmd = 'setfattr -n "user.' .. key .. '" -v "' .. value .. '" "' .. file .. '"'
+
 		local result = os.execute(cmd)
-
-		-- TODO: Handle result
+		if not result then
+			local err = string.format("Could not set extended attribute %s of file %s", key, file)
+			vim.notify(err, vim.log.levels.ERROR)
+		end
 	end
 end
 
----comment
----@param content string[]
----@return table
-M._parse_xattrs = function(content, attribute_prefix)
+local function parse_xattrs(opts, content)
 	-- Escape all special characters in the attribute_prefix
-	local escaped_attribute_prefix = attribute_prefix:gsub("([%.%-%*%+%?%^%$%[%]%(%)%\\])", "%%%1")
+	local escaped_attribute_prefix = opts.attribute_prefix:gsub("([%.%-%*%+%?%^%$%[%]%(%)%\\])", "%%%1")
 
 	local result = {}
 	local key_builder = {}
 	local value_builder = {}
 	local in_key = false
 
+	local function builder_to_string(tbl)
+		return table.concat(tbl, "\n"):match("^(.-)%s*$")
+	end
+
 	for _, line in ipairs(content) do
 		-- Parse key
 		if in_key then
-			if line:sub(1, #attribute_prefix) == attribute_prefix then
-				table.insert(key_builder, line:match("^" .. escaped_attribute_prefix .. "%s*(%S*)%s*"))
+			if line:sub(1, #opts.attribute_prefix) == opts.attribute_prefix then
+				table.insert(key_builder, line:match("^" .. escaped_attribute_prefix .. "%s*(.-)%s*$"))
 				goto continue
 			else
 				in_key = false
@@ -153,11 +159,11 @@ M._parse_xattrs = function(content, attribute_prefix)
 		end
 
 		-- Found key
-		local key_prefix = line:match("^" .. escaped_attribute_prefix .. "%s*attr:%s*(%S+)%s*")
+		local key_prefix = line:match("^" .. escaped_attribute_prefix .. "%s*attr:%s*(.-)%s*$")
 		if key_prefix ~= nil then
 			-- We have a previously created key-value pair
 			if #key_builder > 0 then
-				result[table.concat(key_builder, "\n")] = table.concat(value_builder, "\n")
+				result[builder_to_string(key_builder)] = builder_to_string(value_builder)
 				key_builder = {}
 				value_builder = {}
 			end
@@ -178,17 +184,18 @@ M._parse_xattrs = function(content, attribute_prefix)
 	end
 
 	if #key_builder > 0 then
-		result[table.concat(key_builder, "\n")] = table.concat(value_builder, "\n")
+		result[builder_to_string(key_builder)] = builder_to_string(value_builder)
 	end
 
 	return result
 end
 
----comment
----@param file string
----@return string
-M.xattrs_buffer = function(file)
-	local xattrs = get_xattrs(file)
+local M = {
+	attribute_prefix = "#"
+}
+
+M._xattrs_buffer = function(file, xattrs_getter, buffer_writer)
+	local xattrs = xattrs_getter(M, file)
 	if xattrs == nil then
 		return ""
 	end
@@ -201,7 +208,7 @@ M.xattrs_buffer = function(file)
 	vim.bo[bufno].bufhidden = 'wipe'
 	vim.bo[bufno].swapfile = false
 
-	vim.api.nvim_buf_set_lines(bufno, 0, -1, false, attr_table_to_lines(xattrs))
+	vim.api.nvim_buf_set_lines(bufno, 0, -1, false, buffer_writer(M, xattrs))
 	vim.api.nvim_buf_call(bufno, function()
 		vim.api.nvim_command("silent write")
 	end)
@@ -209,18 +216,28 @@ M.xattrs_buffer = function(file)
 	return temp_file_path
 end
 
-M.xattrs_buffer_write_hook = function(filepath, xattrs_buffer_parser)
+M._xattrs_buffer_write_hook = function(filepath, xattrs_buffer_parser, xattrs_writer)
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		pattern = filepath,
 		callback = function()
 			local lines = vim.fn.readfile(filepath)
-			local attrs = xattrs_buffer_parser(lines, "---")
-			-- M._set_xattrs(file, attrs)
+			local attrs = xattrs_buffer_parser(M, lines)
+			xattrs_writer(M, attrs)
 		end
 	})
 end
 
-local buf = M.xattrs_buffer(vim.fn.expand("%:p"))
-M.xattrs_buffer_write_hook(buf, M._parse_xattrs)
+M.edit_xattrs = function(filepath)
+	local file = filepath or vim.fn.expand("%:p")
+	local current_attrs = get_xattrs(M, file)
+
+	-- Create a buffer with the extended attributes
+	local buf = M._xattrs_buffer(file, function(_, _) return current_attrs end, attr_table_to_lines)
+
+	-- Create a write hook for the buffer to set the extended attributes
+	M._xattrs_buffer_write_hook(buf, parse_xattrs, function(opts, new_attrs)
+		set_xattrs(opts, file, current_attrs, new_attrs)
+	end)
+end
 
 return M

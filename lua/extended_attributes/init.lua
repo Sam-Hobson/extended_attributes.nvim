@@ -13,12 +13,16 @@ M.buf_lines_marshal_attrs = attrs.buf_lines_marshal_attrs
 M.unmarshal_attrs = attrs.unmarshal_attrs
 
 
-M.edit_file_attrs = function(filepath)
+---Edit the extended attributes of the provided file. This function should probably not
+---be modified/overwritten by users.
+---@param filepath string The path to the file to modify the extended attributes of.
+M._edit_file_attrs = function(filepath)
 	local ok, current_attrs = pcall(M.get_file_attrs, M, filepath)
-
 	if not ok then
 		return
-	end -- Create a buffer with the extended attributes
+	end
+
+	-- Create a buffer with the extended attributes
 	local temp_file_path = vim.fn.tempname()
 	vim.api.nvim_command("e " .. temp_file_path)
 
@@ -45,6 +49,7 @@ end
 
 
 M.setup = function(setup_opts)
+	-- Apply user configuration
 	if setup_opts then
 		for key, value in pairs(setup_opts) do
 			if M[key] ~= nil then
@@ -53,10 +58,11 @@ M.setup = function(setup_opts)
 		end
 	end
 
+	-- Create user command for editing extended attributes
 	vim.api.nvim_create_user_command("Xattrs",
 		function(opts)
 			local filepath = opts.args ~= "" and opts.args or vim.api.nvim_buf_get_name(0)
-			M.edit_file_attrs(filepath)
+			M._edit_file_attrs(filepath)
 		end,
 		{ nargs = "?" }
 	)

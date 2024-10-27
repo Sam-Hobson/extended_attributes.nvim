@@ -48,7 +48,7 @@ M.set_file_attrs = function(opts, filepath, previous_attrs, new_attrs)
 	-- Remove all attributes that have been deleted
 	for key, _ in pairs(previous_attrs) do
 		if not new_attrs[key] then
-			local cmd = 'attr -r "' .. key .. '" "' .. filepath .. '"'
+			local cmd = 'attr -r "' .. key .. '" "' .. filepath .. '"' .. " > /dev/null 2>&1"
 
 			local result = os.execute(cmd)
 			if not result then
@@ -77,7 +77,7 @@ M.set_file_attrs = function(opts, filepath, previous_attrs, new_attrs)
 		end
 
 		-- Set the new key-value pair
-		local cmd = 'attr -s "' .. key .. '" -V "' .. value .. '" "' .. filepath .. '"'
+		local cmd = 'attr -s "' .. key .. '" -V "' .. value .. '" "' .. filepath .. '" ' .. " > /dev/null 2>&1"
 
 		local result = os.execute(cmd)
 		if not result then

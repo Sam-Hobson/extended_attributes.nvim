@@ -77,7 +77,7 @@ M.set_file_attrs = function(opts, filepath, previous_attrs, new_attrs)
 		end
 
 		-- Set the new key-value pair
-		local cmd = 'setfattr -n "user.' .. key .. '" -v "' .. value .. '" "' .. filepath .. '"'
+		local cmd = 'attr -s "' .. key .. '" -V "' .. value .. '" "' .. filepath .. '"'
 
 		local result = os.execute(cmd)
 		if not result then

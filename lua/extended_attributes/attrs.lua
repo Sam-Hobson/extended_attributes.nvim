@@ -62,10 +62,21 @@ M.set_file_attrs = function(opts, filepath, previous_attrs, new_attrs)
 	for key, value in pairs(new_attrs) do
 		-- If key or value size exceed max system allow size, then apply strategy
 		if opts.max_key_size and opts.max_key_size < #key then
+			if opts.oversized_strategy == "halt" then
+				error("Key size exceeds maximum key size of " .. opts.max_key_size)
+			elseif opts.oversized_strategy == "truncate" then
+				key = string.sub(key, 1, opts.max_key_size)
+			end
 		end
 		if opts.max_value_size and opts.max_value_size < #value then
+			if opts.oversized_strategy == "halt" then
+				error("Value size exceeds maximum key size of " .. opts.max_value_size)
+			elseif opts.oversized_strategy == "truncate" then
+				value = string.sub(value, 1, opts.max_value_size)
+			end
 		end
 
+		-- Set the new key-value pair
 		local cmd = 'setfattr -n "user.' .. key .. '" -v "' .. value .. '" "' .. filepath .. '"'
 
 		local result = os.execute(cmd)

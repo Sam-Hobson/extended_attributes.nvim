@@ -56,7 +56,7 @@ M.setup = function(setup_opts)
 		end
 	end
 
-	vim.api.nvim_create_user_command("xattrs",
+	vim.api.nvim_create_user_command("Xattrs",
 		function(opts)
 			M.edit_file_attrs(opts.args or nil)
 		end,

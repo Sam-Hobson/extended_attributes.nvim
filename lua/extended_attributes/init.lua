@@ -14,14 +14,11 @@ M.unmarshal_attrs = attrs.unmarshal_attrs
 
 
 M.edit_file_attrs = function(filepath)
-	local file = filepath or vim.fn.expand("%:p")
-	local ok, current_attrs = pcall(M.get_file_attrs, M, file)
+	local ok, current_attrs = pcall(M.get_file_attrs, M, filepath)
 
 	if not ok then
 		return
-	end
-
-	-- Create a buffer with the extended attributes
+	end -- Create a buffer with the extended attributes
 	local temp_file_path = vim.fn.tempname()
 	vim.api.nvim_command("e " .. temp_file_path)
 
@@ -41,7 +38,7 @@ M.edit_file_attrs = function(filepath)
 		callback = function()
 			local lines = vim.fn.readfile(temp_file_path)
 			local new_attrs = M.unmarshal_attrs(M, lines)
-			M.set_file_attrs(M, file, current_attrs, new_attrs)
+			M.set_file_attrs(M, filepath, current_attrs, new_attrs)
 		end
 	})
 end
@@ -58,7 +55,8 @@ M.setup = function(setup_opts)
 
 	vim.api.nvim_create_user_command("Xattrs",
 		function(opts)
-			M.edit_file_attrs(opts.args or nil)
+			local filepath = opts.args ~= "" and opts.args or vim.api.nvim_buf_get_name(0)
+			M.edit_file_attrs(filepath)
 		end,
 		{ nargs = "?" }
 	)

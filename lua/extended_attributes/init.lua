@@ -2,9 +2,28 @@ local attrs = require("extended_attributes.attrs")
 
 local M = {}
 
+local validators = {}
+local function add_configuration_option(name, default_value, validator)
+	M[name] = default_value
+	if validator then
+		validators[name] = validator
+	end
+end
 
 -- Config values
-M.attribute_prefix = "#"
+add_configuration_option("attribute_prefix", "#")
+
+add_configuration_option("attribute_keyword", "attr:",
+	function(x) return x ~= "", "attribute_keyword must have a value" end)
+
+add_configuration_option("max_key_size", 255,
+	function(x) return not x or x > 0, "max_key_size must be nil or greater than 0" end)
+
+add_configuration_option("max_value_size", 65536,
+	function(x) return not x or x > 0, "max_value_size must be nil or greater than 0" end)
+
+add_configuration_option("oversized_strategy", "truncate",
+	function(x) return x == "truncate" or x == "halt", 'oversized_strategy must be equal to "truncate" or "halt"' end)
 
 -- Config functions
 M.get_file_attrs = attrs.get_file_attrs
@@ -53,6 +72,12 @@ M.setup = function(setup_opts)
 	if setup_opts then
 		for key, value in pairs(setup_opts) do
 			if M[key] ~= nil then
+				if validators[key] ~= nil then
+					local ok, err = validators[key](value)
+					if not ok then
+						error(err)
+					end
+				end
 				M[key] = value
 			end
 		end

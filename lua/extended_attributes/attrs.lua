@@ -60,6 +60,12 @@ M.set_file_attrs = function(opts, filepath, previous_attrs, new_attrs)
 
 	-- Update all attributes that have been changed
 	for key, value in pairs(new_attrs) do
+		-- If key or value size exceed max system allow size, then apply strategy
+		if opts.max_key_size and opts.max_key_size < #key then
+		end
+		if opts.max_value_size and opts.max_value_size < #value then
+		end
+
 		local cmd = 'setfattr -n "user.' .. key .. '" -v "' .. value .. '" "' .. filepath .. '"'
 
 		local result = os.execute(cmd)
@@ -92,7 +98,7 @@ M.buf_lines_marshal_attrs = function(opts, extended_attributes)
 			end
 
 			if first_line_key then
-				table.insert(result, string.format("%s attr: %s", opts.attribute_prefix, line))
+				table.insert(result, string.format("%s %s %s", opts.attribute_prefix, opts.attribute_keyword, line))
 			else
 				table.insert(result, string.format("%s %s", opts.attribute_prefix, line))
 			end
@@ -149,7 +155,7 @@ M.unmarshal_attrs = function(opts, content)
 		end
 
 		-- Found key
-		local key_prefix = line:match("^" .. escaped_attribute_prefix .. "%s*attr:%s*(.-)%s*$")
+		local key_prefix = line:match("^" .. escaped_attribute_prefix .. "%s*" .. opts.attribute_keyword .. "%s*(.-)%s*$")
 		if key_prefix ~= nil then
 			-- We have a previously created key-value pair
 			if #key_builder > 0 then

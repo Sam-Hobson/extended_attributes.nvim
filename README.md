@@ -35,6 +35,50 @@ Install the plugin with your preferred package manager:
 
 ## 🚀 Usage
 
+extended_attributes.nvim is used to modify the extended attributes on files.
+Executing `Xattrs` will open a temporary buffer for the current or specified file,
+where extended attributes can be modified, created, and deleted.
+
+Eg:
+`:Xattrs <optional filename>`
+
+Buffer:
+```
+# attr: my first attribute
+This is the value of the attribute
+
+# attr: This is my second attribute
+#
+# newline
+This is my second attribute value
+
+newline
+```
+
+Result:
+```sh
+$ attr example_file -l
+Attribute "my first attribute" has a 34 byte value for example_file
+Attribute "This is my second attribute
+
+newline" has a 42 byte value for example_file
+
+$ attr example_file -g "my first attribute"
+Attribute "my first attribute" had a 34 byte value for example_file:
+This is the value of the attribute
+
+$ attr example_file -g "This is my second attribute
+
+newline"
+Attribute "This is my second attribute
+
+newline" had a 42 byte value for example_file:
+This is my second attribute value
+
+newline
+```
+
+
 ## ⚙️ Configuration
 
 The default settings applied to the plugin are:
@@ -88,7 +132,7 @@ require("extended_attributes").setup({
 
 		return attrs
 	end,
-	set_files_attrs = function(opts, filepath, previous_attrs, new_attrs)
+	set_file_attrs = function(opts, filepath, previous_attrs, new_attrs)
 		-- Update all attributes that have been changed
 		for key, value in pairs(new_attrs) do
 			local cmd = 'setfattr -n "' .. key .. '" -v "' .. value .. '" "' .. filepath .. '"'
